@@ -1,0 +1,32 @@
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+
+# Google OAuth credentials and cached tokens
+credentials/
+*.json.bak
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and test files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated local output
+output/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
