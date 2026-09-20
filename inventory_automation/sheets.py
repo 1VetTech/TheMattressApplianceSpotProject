@@ -5,8 +5,7 @@ from __future__ import annotations
 import csv
 import io
 from typing import Any
-
-import requests
+from urllib.request import urlopen
 
 from inventory_automation.config import Settings
 
@@ -26,16 +25,11 @@ def fetch_inventory_rows(
         A list of nonempty inventory rows keyed by column header.
 
     Raises:
-        requests.HTTPError: If the CSV cannot be downloaded.
+        HTTPError: If the CSV cannot be downloaded.
         ValueError: If the response is empty or has no headers.
     """
-    response = requests.get(
-        settings.public_inventory_csv_url,
-        timeout=30,
-    )
-    response.raise_for_status()
-
-    csv_text = response.text.lstrip("\ufeff").strip()
+    with urlopen(settings.public_inventory_csv_url, timeout=30) as response:
+        csv_text = response.read().decode("utf-8-sig").strip()
 
     if not csv_text:
         raise ValueError("The published inventory CSV is empty.")
