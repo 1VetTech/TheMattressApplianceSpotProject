@@ -22,7 +22,7 @@ class Settings:
     output_json: Path
 
     @classmethod
-    def from_environment(cls) -> "Settings":
+    def from_environment(cls) -> Settings:
         """Load application settings from the local environment.
 
         Returns:
