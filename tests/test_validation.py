@@ -1,3 +1,4 @@
+
 """Tests for public inventory validation."""
 
 from decimal import Decimal
@@ -13,17 +14,18 @@ def make_valid_row() -> dict[str, str]:
         "SKU": " bed001 ",
         "Category": " Bedroom ",
         "Item": " Cayboni   Bedroom Set ",
-        "Sell Price": "$999",
         "Qty": "1",
+        "Sell Price": "$999",
         "Description": " Whitewash bedroom set. ",
-        "Image URL": "https://example.com/BED001.jpg",
+        "imageLinks": "https://example.com/BED001.jpg",
+        "APK": "https://example.com/products/bed001",
         "Color": "Whitewash",
         "Website Status": "Published",
     }
 
 
 def test_valid_row_is_normalized() -> None:
-    """A valid public row should become a Product."""
+    """A valid public row should become a normalized Product."""
     products, warnings = validate_inventory_rows([make_valid_row()])
 
     assert warnings == []
@@ -49,13 +51,16 @@ def test_duplicate_sku_raises_error() -> None:
         validate_inventory_rows([first_row, second_row])
 
 
-def test_missing_sell_price_raises_error() -> None:
-    """Published products must have a valid selling price."""
+def test_missing_sell_price_is_allowed() -> None:
+    """A missing selling price should be allowed with a warning."""
     row = make_valid_row()
     row["Sell Price"] = ""
 
-    with pytest.raises(ValueError, match="valid Sell Price"):
-        validate_inventory_rows([row])
+    products, warnings = validate_inventory_rows([row])
+
+    assert len(products) == 1
+    assert products[0].sell_price is None
+    assert warnings
 
 
 def test_nonpublished_row_is_skipped() -> None:
@@ -67,3 +72,16 @@ def test_nonpublished_row_is_skipped() -> None:
 
     assert products == []
     assert any("was skipped" in warning for warning in warnings)
+
+
+def test_product_and_image_urls_are_present() -> None:
+    """Valid image and product-page URLs should be retained."""
+    products, warnings = validate_inventory_rows([make_valid_row()])
+
+    assert len(products) == 1
+
+    product = products[0]
+
+    assert product.image_url == "https://example.com/BED001.jpg"
+    assert product.product_url == "https://example.com/products/bed001"
+    assert warnings == []

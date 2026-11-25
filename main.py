@@ -1,3 +1,4 @@
+
 """
 main.py
 
@@ -8,20 +9,14 @@ from __future__ import annotations
 
 import logging
 import sys
-import warnings
 
 from inventory_automation.config import Settings
 from inventory_automation.exporter import write_inventory_json
 from inventory_automation.sheets import fetch_inventory_rows
-from inventory_automation.validation import validate_inventory_rows
-
-
-# ==========================================================
-# WARNING CONFIGURATION
-# ==========================================================
-
-# Suppress non-critical warnings.
-warnings.filterwarnings("ignore")
+from inventory_automation.validation import (
+    check_product_urls,
+    validate_inventory_rows,
+)
 
 
 # ==========================================================
@@ -29,12 +24,7 @@ warnings.filterwarnings("ignore")
 # ==========================================================
 
 def configure_logging() -> None:
-    """
-    Configure application logging.
-
-    Change INFO to ERROR if you only want to
-    see failures in production.
-    """
+    """Configure application logging."""
 
     logging.basicConfig(
         level=logging.INFO,
@@ -49,8 +39,8 @@ def configure_logging() -> None:
 def run() -> int:
     """
     Download the published inventory CSV,
-    validate products, and generate the
-    website inventory JSON file.
+    validate products and URLs, and generate
+    website inventory JSON.
 
     Returns:
         0 = Success
@@ -84,23 +74,65 @@ def run() -> int:
         )
 
         # ------------------------------------------
-        # Validation
+        # Spreadsheet Validation
         # ------------------------------------------
+
+        logger.info(
+            "Validating inventory products..."
+        )
 
         products, warning_messages = validate_inventory_rows(rows)
 
+        logger.info(
+            "Validated %d publishable product(s).",
+            len(products),
+        )
+
+        # ------------------------------------------
+        # Live URL Verification
+        # ------------------------------------------
+
+        logger.info(
+            "Checking product image and product-page URLs..."
+        )
+
+        url_warnings = check_product_urls(
+            products,
+            timeout=8,
+        )
+
+        warning_messages.extend(url_warnings)
+
+        logger.info(
+            "Live URL verification completed with %d warning(s).",
+            len(url_warnings),
+        )
+
+        # ------------------------------------------
+        # Warning Report
+        # ------------------------------------------
+
         if warning_messages:
             logger.warning(
-                "Validation completed with %d warning(s).",
+                "Inventory processing completed with %d warning(s).",
                 len(warning_messages),
             )
 
             for message in warning_messages:
                 logger.warning(message)
 
+        else:
+            logger.info(
+                "No inventory or URL warnings detected."
+            )
+
         # ------------------------------------------
         # Export JSON
         # ------------------------------------------
+
+        logger.info(
+            "Generating website inventory JSON..."
+        )
 
         write_inventory_json(
             products,

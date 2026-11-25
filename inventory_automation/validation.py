@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
 
 from inventory_automation.models import Product
@@ -93,7 +95,7 @@ def validate_inventory_rows(
 
         seen_skus.add(sku)
 
-        # Missing or invalid prices no longer stop the export.
+        # Missing or invalid prices do not stop the export.
         sell_price = _parse_decimal(
             row.get("Sell Price"),
             row_number,
@@ -136,7 +138,7 @@ def validate_inventory_rows(
                 f"Row {row_number} ({sku}) has no description."
             )
 
-        # Validate image URL.
+        # Validate image URL structure.
         if not image_url:
             warnings.append(
                 f"Row {row_number} ({sku}) has no imageLinks URL."
@@ -148,7 +150,7 @@ def validate_inventory_rows(
             )
             image_url = ""
 
-        # Validate Ashley product page URL.
+        # Validate product page URL structure.
         if not product_url:
             warnings.append(
                 f"Row {row_number} ({sku}) has no APK product URL."
@@ -183,6 +185,102 @@ def validate_inventory_rows(
     return products, warnings
 
 
+def check_product_urls(
+    products: list[Product],
+    timeout: int = 8,
+) -> list[str]:
+    """Check whether product image and product-page URLs are reachable.
+
+    URL failures create warnings. They do not remove products or stop export.
+    """
+    warnings: list[str] = []
+
+    for product in products:
+
+        # Check the product image.
+        if product.image_url:
+            success, detail, content_type = _check_remote_url(
+                product.image_url,
+                timeout,
+            )
+
+            if not success:
+                warnings.append(
+                    f"{product.sku}: Image URL check failed: {detail}"
+                )
+
+            elif not content_type.startswith("image/"):
+                warnings.append(
+                    f"{product.sku}: Image URL returned unexpected "
+                    f"content type: {content_type or 'unknown'}"
+                )
+
+        # Check the product page.
+        if product.product_url:
+            success, detail, _ = _check_remote_url(
+                product.product_url,
+                timeout,
+            )
+
+            if not success:
+                warnings.append(
+                    f"{product.sku}: Product URL check failed: {detail}"
+                )
+
+    return warnings
+
+
+def _check_remote_url(
+    url: str,
+    timeout: int,
+) -> tuple[bool, str, str]:
+    """Request a remote URL and return status and content type.
+
+    Uses a small Range request to reduce unnecessary downloads.
+    Some servers ignore Range requests, so the response body is not read.
+    """
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "1VETTECH-Inventory-Validator/1.0",
+            "Range": "bytes=0-1023",
+        },
+        method="GET",
+    )
+
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status = response.status
+            final_url = response.geturl()
+
+            content_type = response.headers.get(
+                "Content-Type", ""
+            ).split(";")[0].strip().lower()
+
+            # Reject redirects that downgrade HTTPS to HTTP.
+            if urlsplit(final_url).scheme.lower() != "https":
+                return (
+                    False,
+                    "Redirected to a non-HTTPS address.",
+                    content_type,
+                )
+
+            if not 200 <= status < 300:
+                return (
+                    False,
+                    f"HTTP status {status}.",
+                    content_type,
+                )
+
+            return True, f"HTTP status {status}.", content_type
+
+    except HTTPError as error:
+        return False, f"HTTP status {error.code}.", ""
+
+    except (URLError, TimeoutError, OSError, ValueError) as error:
+        return False, str(error), ""
+
+
 def _clean_text(value: Any) -> str:
     """Normalize a spreadsheet value into trimmed text."""
     if value is None:
@@ -194,7 +292,7 @@ def _clean_text(value: Any) -> str:
 def _is_valid_https_url(value: str) -> bool:
     """Check URL structure and require HTTPS.
 
-    This does not confirm that the remote page or image actually exists.
+    This does not confirm that the remote page or image exists.
     """
     try:
         parsed = urlsplit(value)
@@ -207,6 +305,7 @@ def _is_valid_https_url(value: str) -> bool:
             and not parsed.password
             and not any(char.isspace() for char in value)
         )
+
     except ValueError:
         return False
 
@@ -226,6 +325,7 @@ def _parse_decimal(
 
     try:
         amount = Decimal(text)
+
     except InvalidOperation:
         warnings.append(
             f"Row {row_number} has an invalid {field_name}: {value!r}."
@@ -256,6 +356,7 @@ def _parse_integer(
 
     try:
         number = int(text)
+
     except ValueError:
         warnings.append(
             f"Row {row_number} has an invalid {field_name}: {value!r}."
