@@ -1,3 +1,4 @@
+
 """JSON export helpers for validated inventory data."""
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from inventory_automation.models import Product
 def _product_to_public_dict(product: Product) -> dict[str, Any]:
     """Convert a product into customer-facing website data.
 
-    Internal review notes are intentionally excluded from the public JSON.
+    Internal review notes are intentionally excluded from public JSON.
 
     Args:
         product: Validated inventory product.
@@ -22,7 +23,18 @@ def _product_to_public_dict(product: Product) -> dict[str, Any]:
         A JSON-compatible dictionary containing public product fields.
     """
     product_data = product.to_dict()
+
+    # Do not expose internal review information.
     product_data.pop("review_notes", None)
+
+    # Give the website a ready-to-display price.
+    if product.sell_price is None or product.sell_price <= 0:
+        product_data["display_price"] = "Coming Soon"
+    else:
+        product_data["display_price"] = (
+            f"${product.sell_price:,.2f}"
+        )
+
     return product_data
 
 
