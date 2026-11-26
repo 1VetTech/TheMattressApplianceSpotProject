@@ -9,7 +9,7 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class Product:
+class Product:  # pylint: disable=too-many-instance-attributes
     """Represents one validated website product.
 
     Attributes:
