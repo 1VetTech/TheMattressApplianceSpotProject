@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -12,28 +11,43 @@ from urllib.request import Request, urlopen
 from inventory_automation.models import Product
 
 
+# WEBSITE LINK is intentionally optional.
+# Sell Price and APK are not required or processed.
 REQUIRED_COLUMNS = {
     "SKU",
     "Category",
     "Item",
-    "Sell Price",
     "Qty",
-    "Description",
     "imageLinks",
-    "APK",
+    "Description",
     "Color",
     "Website Status",
 }
 
 
+# pylint: disable=too-many-locals, too-many-branches
 def validate_inventory_rows(
     rows: list[dict[str, Any]],
 ) -> tuple[list[Product], list[str]]:
     """Validate public inventory rows and create Product objects.
 
     Only rows marked Publish or Published are accepted.
-    Missing or unavailable prices are allowed.
-    Duplicate SKUs or missing columns stop the export.
+
+    WEBSITE LINK is optional. When supplied, it is checked and
+    retained internally for URL verification.
+
+    Sell Price and APK are intentionally ignored.
+
+    Duplicate SKUs or missing required columns stop the export.
+
+    Args:
+        rows: Raw rows downloaded from the public inventory CSV.
+
+    Returns:
+        Validated products and warning messages.
+
+    Raises:
+        ValueError: If required columns are missing or duplicate SKUs exist.
     """
     if not rows:
         return [], ["The public inventory contains no rows."]
@@ -111,20 +125,6 @@ def _build_product(
     """Build a Product object and collect validation warnings."""
     warnings: list[str] = []
 
-    sell_price = _parse_decimal(
-        row.get("Sell Price"),
-        row_number,
-        "Sell Price",
-        warnings,
-    )
-
-    if sell_price is None or sell_price == 0:
-        warnings.append(
-            f"Row {row_number} ({sku}) has no confirmed selling price. "
-            "Website should display Coming Soon."
-        )
-        sell_price = None
-
     quantity = _parse_integer(
         row.get("Qty"),
         row_number,
@@ -135,7 +135,10 @@ def _build_product(
     category = _clean_text(row.get("Category"))
     description = _clean_text(row.get("Description"))
     image_url = _clean_text(row.get("imageLinks"))
-    product_url = _clean_text(row.get("APK"))
+
+    # WEBSITE LINK is optional. APK is not used.
+    product_url = _clean_text(row.get("WEBSITE LINK"))
+
     color = _clean_text(row.get("Color"))
 
     warnings.extend(
@@ -159,7 +162,6 @@ def _build_product(
         sku=sku,
         category=category,
         item=item,
-        sell_price=sell_price,
         quantity=quantity,
         description=description,
         image_url=image_url,
@@ -200,7 +202,7 @@ def _validate_product_links(
     image_url: str,
     product_url: str,
 ) -> tuple[str, str, list[str]]:
-    """Validate both image and product-page URLs."""
+    """Validate the required image and optional product-page URLs."""
     warnings: list[str] = []
 
     image_url, image_warnings = _validate_url_field(
@@ -212,14 +214,17 @@ def _validate_product_links(
     )
     warnings.extend(image_warnings)
 
-    product_url, product_warnings = _validate_url_field(
-        product_url,
-        row_number,
-        sku,
-        "APK product URL",
-        "APK URL",
-    )
-    warnings.extend(product_warnings)
+    # Only validate WEBSITE LINK when a value is supplied.
+    # A blank WEBSITE LINK is allowed and creates no warning.
+    if product_url:
+        product_url, product_warnings = _validate_url_field(
+            product_url,
+            row_number,
+            sku,
+            "WEBSITE LINK",
+            "WEBSITE LINK URL",
+        )
+        warnings.extend(product_warnings)
 
     return image_url, product_url, warnings
 
@@ -250,9 +255,10 @@ def check_product_urls(
     products: list[Product],
     timeout: int = 8,
 ) -> list[str]:
-    """Check whether product image and product-page URLs are reachable.
+    """Check image URLs and optional product-page URLs.
 
-    URL failures create warnings. They do not remove products or stop export.
+    URL failures create warnings. They do not remove products or
+    stop the inventory export.
     """
     warnings: list[str] = []
 
@@ -273,6 +279,7 @@ def check_product_urls(
                     f"content type: {content_type or 'unknown'}"
                 )
 
+        # Check the Ashley product page only when supplied.
         if product.product_url:
             success, detail, _ = _check_remote_url(
                 product.product_url,
@@ -281,7 +288,7 @@ def check_product_urls(
 
             if not success:
                 warnings.append(
-                    f"{product.sku}: Product URL check failed: {detail}"
+                    f"{product.sku}: WEBSITE LINK check failed: {detail}"
                 )
 
     return warnings
@@ -361,36 +368,6 @@ def _is_valid_https_url(value: str) -> bool:
 
     except ValueError:
         return False
-
-
-def _parse_decimal(
-    value: Any,
-    row_number: int,
-    field_name: str,
-    warnings: list[str],
-) -> Decimal | None:
-    """Parse a nonnegative currency value."""
-    text = _clean_text(value).replace("$", "").replace(",", "")
-
-    if not text:
-        return None
-
-    try:
-        amount = Decimal(text)
-    except InvalidOperation:
-        warnings.append(
-            f"Row {row_number} has an invalid {field_name}: {value!r}."
-        )
-        return None
-
-    if not amount.is_finite() or amount < 0:
-        warnings.append(
-            f"Row {row_number} has an invalid or negative "
-            f"{field_name}: {value!r}."
-        )
-        return None
-
-    return amount
 
 
 def _parse_integer(

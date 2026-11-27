@@ -11,46 +11,34 @@ from typing import Any
 from inventory_automation.models import Product
 
 
+PUBLIC_FIELDS = {
+    "sku",
+    "category",
+    "item",
+    "quantity",
+    "description",
+    "image_url",
+    "color",
+    "website_status",
+}
+
+
 def _product_to_public_dict(product: Product) -> dict[str, Any]:
-    """Convert a product into customer-facing website data.
-
-    Internal review notes are intentionally excluded from public JSON.
-
-    Args:
-        product: Validated inventory product.
-
-    Returns:
-        A JSON-compatible dictionary containing public product fields.
-    """
+    """Return only approved customer-facing product fields."""
     product_data = product.to_dict()
 
-    # Do not expose internal review information.
-    product_data.pop("review_notes", None)
-
-    # Give the website a ready-to-display price.
-    if product.sell_price is None or product.sell_price <= 0:
-        product_data["display_price"] = "Coming Soon"
-    else:
-        product_data["display_price"] = (
-            f"${product.sell_price:,.2f}"
-        )
-
-    return product_data
+    return {
+        field: product_data[field]
+        for field in PUBLIC_FIELDS
+        if field in product_data
+    }
 
 
 def write_inventory_json(
     products: list[Product],
     output_path: Path,
 ) -> None:
-    """Write validated products to a public website JSON file.
-
-    The completed data is first written to a temporary file. The temporary
-    file replaces the website JSON only after writing succeeds.
-
-    Args:
-        products: Validated inventory products.
-        output_path: Destination path for the generated JSON file.
-    """
+    """Write validated products to a public website JSON file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {
